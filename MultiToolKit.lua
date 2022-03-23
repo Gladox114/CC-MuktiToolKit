@@ -46,12 +46,13 @@ end
 -- variables
 local fuel_critical = 80
 local fuel_normal = 400
-local fuel_chest = new(-1,0,-1)
-local fuel_chest_facing = 3
-local dispose_chest = new(-2,0,-1)
-local dispose_chest_facing = 3
+local fuel_chest = new(0,0,0)
+local fuel_chest_facing = 1
+local dispose_chest = new(-1,0,0)
+local dispose_chest_facing = 1
 local coordinates = new(0,0,0)
 local direction = 0
+
 local strip_axis = 1 -- main path axis x,y,z for 1,2,3 and -1,-2,-3 for other direction
 local strip_direction = 0
 local strip_leftLimit = 11
@@ -59,9 +60,20 @@ local strip_rightLimit = 11
 local strip_maxStrips = 100
 local strip_current = 1
 local strip_stripDistance = 2
+
 local torch_distance = 7
 local torch_startDistance = 0
-local strip_startPosition = NULL
+
+local excavate_direction = 0
+local excavate_forward = 2
+local excavate_left = 0
+local excavate_right = 1
+local excavate_up = 2
+local excavate_down = 3
+local excavate_current = 1
+local excavate_currentLayer = 0
+
+local startPosition = NULL
 local savedLocation = NULL
 local savedDirection = NULL
 local locationStack = {}
@@ -291,6 +303,23 @@ function walkTo(vecPos, func)
         walkX(pos.z,1,3,func)
         walkX(pos.x,0,2,func)
     end
+    if (pos.y < 0) then
+        for i=1,-pos.y do
+            while (not turtle.down()) do
+                turtle.digDown()
+            end
+            coordinates = coordinates + directionWalk[5](1)
+            checkFuel()
+        end
+    elseif (pos.y > 0) then
+        for i=1,pos.y do
+            while (not turtle.up()) do
+                turtle.digUp()
+            end
+            coordinates = coordinates + directionWalk[4](1)
+            checkFuel()
+        end
+    end
 end
 
 function backwards()
@@ -446,14 +475,14 @@ end
 
 function stripMain()
     -- start the strip from the current position
-    strip_startPosition = coordinates:clone()
-    table.insert(locationStack,strip_startPosition)
-    table.insert(locationStack,strip_startPosition)
+    startPosition = startPosition or coordinates:clone()
+    table.insert(locationStack,startPosition)
+    table.insert(locationStack,startPosition)
     -- loop the strip algorithm
     for currentStrip_i=strip_current,strip_maxStrips do 
         strip_current = currentStrip_i
         -- get the next strip Positions
-        local stripPos = strip_startPosition+directionWalk[strip_direction]((strip_stripDistance+1)*currentStrip_i)
+        local stripPos = startPosition+directionWalk[strip_direction]((strip_stripDistance+1)*currentStrip_i)
         local stripLeftPos = stripPos+directionWalk[(strip_direction-1)%4](strip_leftLimit)
         local stripRightPos = stripPos+directionWalk[(strip_direction+1)%4](strip_rightLimit)
         
@@ -477,14 +506,14 @@ end
 
 function stripMainPyramid()
     -- start the strip from the current position
-    strip_startPosition = coordinates:clone()
-    table.insert(locationStack,strip_startPosition)
-    table.insert(locationStack,strip_startPosition)
+    startPosition = coordinates:clone()
+    table.insert(locationStack,startPosition)
+    table.insert(locationStack,startPosition)
     -- loop the strip algorithm
     for currentStrip_i=strip_current,strip_maxStrips do 
         strip_current = currentStrip_i
         -- get the next strip Positions
-        local stripPos = strip_startPosition+directionWalk[strip_direction]((strip_stripDistance+1)*currentStrip_i)
+        local stripPos = startPosition+directionWalk[strip_direction]((strip_stripDistance+1)*currentStrip_i)
         local stripLeftPos = stripPos+directionWalk[(strip_direction-1)%4](strip_leftLimit+currentStrip_i-1)
         local stripRightPos = stripPos+directionWalk[(strip_direction+1)%4](strip_rightLimit+currentStrip_i-1)
         
@@ -506,20 +535,189 @@ function stripMainPyramid()
 
 end
 
+function excavateWalk()
+    turtle.dig()
+    checkInventory()
+    walk()
+    turtle.digUp()
+    turtle.digDown()
+end
+
+function excavateUpWalk()
+    turtle.dig()
+    checkInventory()
+    walk()
+    turtle.digUp()
+end
+
+function excavateDownWalk()
+    turtle.dig()
+    checkInventory()
+    walk()
+    turtle.digDown()
+end
+
+
+
+-- formular to create zigzag pattern in front or right direction
+function excavateLayer(i1,i2,iter,veryLeftPos,length,directionIter,directionToGo,func)
+    local zigPos
+    local zagPos
+    print("going this path: "..tostring(directionWalk[directionToGo](length)))
+
+    for i=i1,i2,iter do
+        if (i%2 == 0) then
+            zigPos = veryLeftPos + directionWalk[directionIter](i)
+            zagPos = veryLeftPos + directionWalk[directionToGo](length) + directionWalk[directionIter](i)
+        else
+            zigPos = veryLeftPos + directionWalk[directionToGo](length) + directionWalk[directionIter](i)
+            zagPos = veryLeftPos + directionWalk[directionIter](i)
+        end
+        if (iter < 0) then
+            walkTo(zagPos,func)
+            walkTo(zigPos,func)
+        else
+            walkTo(zigPos,func)
+            walkTo(zagPos,func)
+        end
+    end
+end
+
+
+-- calculates the veryLeft Position and looks if it excavates Vertically or Horizontally
+function excavate(forward,left,right,layer,offset,func)
+    -- calculates the fastest zigzag pattern
+    local width = left+right+1
+
+    local veryLeftPos = startPosition + directionWalk[excavate_direction](1) + directionWalk[(excavate_direction-1)%4](left) + directionWalk[4](offset)
+    if (forward < width) then
+        -- if the width is larger then begin from left to right    
+        if (layer%2 == 0) then
+            excavateLayer(0,forward-1,1,veryLeftPos,width,excavate_direction,(excavate_direction+1)%4,func)
+        else
+            excavateLayer(forward-1,0,-1,veryLeftPos,width,excavate_direction,(excavate_direction+1)%4,func)
+        end
+    else
+        -- if front is larger then begin left but go forward and back again in zigzag
+        print("front")
+        if (layer%2 == 0) then
+            excavateLayer(0,width-1,1,veryLeftPos,forward,(excavate_direction+1)%4,excavate_direction,func)
+        else
+            excavateLayer(width-1,0,-1,veryLeftPos,forward,(excavate_direction+1)%4,excavate_direction,func)
+        end
+    end
+end
+
+--[[
+function excavate(forward,left,right,layer,func)
+    -- calculates the fastest zigzag pattern
+    local width = left+right+1
+
+    local veryLeftPos = startPosition+directionWalk[excavate_direction](1)+directionWalk[(excavate_direction-1)%4](left)
+    local zigPos
+    local zagPos
+    if (forward < width) then
+        -- if the width is larger then begin from left to right    
+        for i=0,front-1 then
+            if (i%2 == 0) then
+                -- go to the left edge. iterates forward
+                zigPos = veryLeftPos+directionWalk[excavate_direction](i)
+                -- go to the right edge. iterates forward
+                zagPos = veryLeftPos+directionWalk[(excavate_direction-1)%4](width)+directionWalk[excavate_direction](i)
+            else
+                zigPos = veryLeftPos+directionWalk[(excavate_direction-1)%4](width)+directionWalk[excavate_direction](i)
+                zagPos = veryLeftPos+directionWalk[excavate_direction](i)
+            end
+            walkTo(zigPos,func)
+            walkTo(zagPos,func)
+        end
+    else
+        -- if front is larger then begin left but go forward and back again in zigzag
+        -- local veryFrontPos = veryLeftPos+directionWalk[excavate_direction](front)
+        for i=0,width-1 then
+            if (i%2 == 0) then
+                -- the begin which  iterates to the right
+                zigPos = veryLeftPos + directionWalk[(excavate_direction+1)%4](i)
+                -- the forwardFront which  iterates to the right
+                zagPos = veryLeftPos + directionWalk[excavate_direction](front) + directionWalk[(excavate_direction+1)%4](i)
+            else
+                zigPos = veryLeftPos + directionWalk[excavate_direction](front) + directionWalk[(excavate_direction+1)%4](i)
+                zagPos = veryLeftPos + directionWalk[(excavate_direction+1)%4](i)
+            end
+            walkTo(zigPos,func)
+            walkTo(zagPos,func)
+        end
+    end
+end]]
+
+-- define direction 
+-- define depth forward, left, right, up and down.
+-- firstly it tries to do the first down layer. With that it goes slowly up till the top
+
+function excavateEverything()
+    local upLength = excavate_up+excavate_down+1
+    local offset = -excavate_down
+
+    -- it can dig 3 blocks in one layer. Lets split up these layers in chunks
+    local layers = math.ceil(upLength/3)
+
+    -- if it has enough room to go one up then do this
+    if (upLength > 1) then
+        offset = offset+1
+    end
+
+    for i=excavate_currentLayer,layers do
+        print("layer: "..i)
+        print("upLength: "..upLength)
+        print("offset: "..offset)
+        -- if it has 3 blocks space
+        if (upLength > 2) then
+            excavate(excavate_forward,excavate_left,excavate_right,i,offset,excavateWalk)
+            upLength = upLength-3
+            offset = offset+3
+        -- if it has only 2 blocks space up
+        elseif (upLength > 1) then
+            excavate(excavate_forward,excavate_left,excavate_right,i,offset,excavateDownWalk)
+            upLength = upLength-2
+        elseif (upLength > 0) then
+            excavate(excavate_forward,excavate_left,excavate_right,i,offset,digWalk)
+            upLength = upLength-1
+        end
+
+    end 
+
+end
+
+function excavateMain()
+    startPosition = startPosition or coordinates:clone()
+    local excavate_mode = excavateWalk
+    table.insert(locationStack,startPosition)
+    table.insert(locationStack,startPosition+directionWalk[excavate_direction](1))
+    print(tostring(directionWalk[4](-excavate_down)))
+    --excavate(excavate_forward,excavate_left,excavate_right,0,-1,excavateWalk)
+    excavateEverything()
+
+end
+
+
+
+-- MAIN --
 while (turtle.getFuelLevel() < 5) do
     print("Refuelling at the begin. Need Coal in Inventory")
     refuel()
 end
 
+--stripMain()
+excavateMain()
 
-stripMain()
 
+-- debug --
 
 
 function demo1()
-    strip_startPosition = coordinates:clone()
-    table.insert(locationStack,strip_startPosition)
-    table.insert(locationStack,strip_startPosition)
+    startPosition = coordinates:clone()
+    table.insert(locationStack,startPosition)
+    table.insert(locationStack,startPosition)
     walkTo(new(2,0,0))
     table.insert(locationStack,new(2,0,0))
     walkTo(new(2,0,2))
