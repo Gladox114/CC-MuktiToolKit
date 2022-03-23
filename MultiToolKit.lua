@@ -225,53 +225,147 @@ end
 function turnTo(x)
     local turns = x-direction
     if (turns < 0) then
-        for i=1,-turns do
-            turnleft()
-        end
-        return     
-    elseif (turns > 0) then
-        for i=1,turns do    
+        if (turns < -2) then
             turnright()
+        else
+            for i=1,-turns do
+                turnleft()
+            end
         end
-        return
+    elseif (turns > 0) then
+        if (turns > 2) then
+            turnleft()
+        else
+            for i=1,turns do    
+                turnright()
+            end
+        end
     end
 end
 
 -- walks forward
 -- updates coordinates and cheks fuel
 -- digs in front if something blocks it
-function walk()
-    while (not turtle.forward()) do
-        turtle.dig()
-    end
-    virtWalk()
-    checkFuel()
-end
 
-function walkNoChecks()
-    while (not turtle.forward()) do
-        turtle.dig()
+walk = {
+    function() 
+        while (not turtle.forward()) do
+            turtle.dig()
+        end
+        virtWalk()
+        checkFuel()
+    end,
+    function() 
+        while (not turtle.up()) do
+            turtle.digUp()
+        end
+        coordinates = coordinates + directionWalk[4](1)
+        checkFuel()
+    end,
+    function() 
+        while (not turtle.down()) do
+            turtle.digDown()
+        end
+        coordinates = coordinates + directionWalk[5](1)
+        checkFuel()
     end
-    virtWalk()
-end
+}
+
+walkNoChecks = {
+    function() 
+        while (not turtle.forward()) do
+            turtle.dig()
+        end
+        virtWalk()
+    end,
+    function() 
+        while (not turtle.up()) do
+            turtle.digUp()
+        end
+        coordinates = coordinates + directionWalk[4](1)
+    end,
+    function() 
+        while (not turtle.down()) do
+            turtle.digDown()
+        end
+        coordinates = coordinates + directionWalk[5](1)
+    end
+}
 
 -- digs and walks
-function digWalk()
-    turtle.dig()
-    checkInventory()
-    walk()
-end
+digWalk = {
+    function()
+        turtle.dig()
+        checkInventory()
+        walk[1]()
+    end,
+    function()
+        turtle.digUp()
+        checkInventory()
+        walk[2]()
+    end,
+    function()
+        turtle.digDown()
+        checkInventory()
+        walk[3]()
+    end
+}
+
+
 
 -- digs up and forward and walks
-function digTunnelWalk()
-    turtle.dig()
-    checkInventory()
-    walk()
-    local _,data = turtle.inspectUp()
-    if (data ~= NULL and data["name"] ~= "minecraft:wall_torch") then
-        turtle.digUp()
+digTunnelWalk = {
+    function()
+        digWalk[1]()
+        local _,data = turtle.inspectUp()
+        if (data ~= NULL and data["name"] ~= "minecraft:wall_torch") then
+            turtle.digUp()
+        end
+    end,
+    function()
+        digWalk[2]()
+        local _,data = turtle.inspectUp()
+        if (data ~= NULL and data["name"] ~= "minecraft:wall_torch") then
+            turtle.digUp()
+        end
+    end,
+    function()
+        digWalk[3]()
     end
-end
+}
+
+
+backwards = {
+    function()
+        torch()
+        while (not turtle.back()) do
+            turtle.turnLeft()
+            turtle.turnLeft()
+            turtle.dig()
+            turtle.turnLeft()
+            turtle.turnLeft()
+        end
+        virtBackward()
+        checkFuel()
+    end,
+    function()
+        torch()
+        while (not turtle.up()) do
+            turtle.digUp()
+        end
+        coordinates = coordinates + directionWalk[4](1)
+        checkFuel()
+    end,
+    function()
+        torch()
+        while (not turtle.down()) do
+            turtle.digDown()
+        end
+        coordinates = coordinates + directionWalk[5](1)
+        checkFuel()
+    end
+}
+
 
 
 function walkX(x,dirPlus,dirNegative,func)
@@ -279,13 +373,13 @@ function walkX(x,dirPlus,dirNegative,func)
         -- turn to negative axis
         turnTo(dirNegative)
         for i=1,-x do
-            func() -- walk function
+            func[1]() -- walk function
         end
     elseif (x > 0) then
         -- turn to positive axis
         turnTo(dirPlus)
         for i=1,x do
-            func() -- walk function
+            func[1]() -- walk function
         end
     end
 end
@@ -305,35 +399,16 @@ function walkTo(vecPos, func)
     end
     if (pos.y < 0) then
         for i=1,-pos.y do
-            while (not turtle.down()) do
-                turtle.digDown()
-            end
-            coordinates = coordinates + directionWalk[5](1)
-            checkFuel()
+            func[3]()
         end
     elseif (pos.y > 0) then
         for i=1,pos.y do
-            while (not turtle.up()) do
-                turtle.digUp()
-            end
-            coordinates = coordinates + directionWalk[4](1)
-            checkFuel()
+            func[2]()
         end
     end
 end
 
-function backwards()
-    torch()
-    while (not turtle.back()) do
-        turtle.turnLeft()
-        turtle.turnLeft()
-        turtle.dig()
-        turtle.turnLeft()
-        turtle.turnLeft()
-    end
-    virtBackward()
-    checkFuel()
-end
+
 
 function walkBackwardsTo(vecPos)
     local pos = vecPos-coordinates
@@ -535,28 +610,49 @@ function stripMainPyramid()
 
 end
 
-function excavateWalk()
-    turtle.dig()
-    checkInventory()
-    walk()
-    turtle.digUp()
-    turtle.digDown()
-end
+excavateWalk = {
+    function()
+        turtle.dig()
+        checkInventory()
+        walk[1]()
+        turtle.digUp()
+        turtle.digDown()
+    end,
+    function()
+        turtle.digUp()
+        checkInventory()
+        walk[2]()
+        turtle.digUp()
+    end,
+    function()
+        turtle.digDown()
+        checkInventory()
+        walk[3]()
+        turtle.digDown()
+    end
+}
 
-function excavateUpWalk()
-    turtle.dig()
-    checkInventory()
-    walk()
-    turtle.digUp()
-end
+excavateUpWalk = {
+    function()
+        turtle.dig()
+        checkInventory()
+        walk[1]()
+        turtle.digUp()
+    end,
+    excavateWalk[2],
+    excavateWalk[3]
+}
 
-function excavateDownWalk()
-    turtle.dig()
-    checkInventory()
-    walk()
-    turtle.digDown()
-end
-
+excavateDownWalk = {
+    function()
+        turtle.dig()
+        checkInventory()
+        walk[1]()
+        turtle.digDown()
+    end,
+    excavateWalk[2],
+    excavateWalk[3]
+}
 
 
 -- formular to create zigzag pattern in front or right direction
@@ -566,6 +662,7 @@ function excavateLayer(i1,i2,iter,veryLeftPos,length,directionIter,directionToGo
     print("going this path: "..tostring(directionWalk[directionToGo](length)))
 
     for i=i1,i2,iter do
+        print("i: "..i)
         if (i%2 == 0) then
             zigPos = veryLeftPos + directionWalk[directionIter](i)
             zagPos = veryLeftPos + directionWalk[directionToGo](length) + directionWalk[directionIter](i)
@@ -599,7 +696,6 @@ function excavate(forward,left,right,layer,offset,func)
         end
     else
         -- if front is larger then begin left but go forward and back again in zigzag
-        print("front")
         if (layer%2 == 0) then
             excavateLayer(0,width-1,1,veryLeftPos,forward,(excavate_direction+1)%4,excavate_direction,func)
         else
@@ -607,48 +703,6 @@ function excavate(forward,left,right,layer,offset,func)
         end
     end
 end
-
---[[
-function excavate(forward,left,right,layer,func)
-    -- calculates the fastest zigzag pattern
-    local width = left+right+1
-
-    local veryLeftPos = startPosition+directionWalk[excavate_direction](1)+directionWalk[(excavate_direction-1)%4](left)
-    local zigPos
-    local zagPos
-    if (forward < width) then
-        -- if the width is larger then begin from left to right    
-        for i=0,front-1 then
-            if (i%2 == 0) then
-                -- go to the left edge. iterates forward
-                zigPos = veryLeftPos+directionWalk[excavate_direction](i)
-                -- go to the right edge. iterates forward
-                zagPos = veryLeftPos+directionWalk[(excavate_direction-1)%4](width)+directionWalk[excavate_direction](i)
-            else
-                zigPos = veryLeftPos+directionWalk[(excavate_direction-1)%4](width)+directionWalk[excavate_direction](i)
-                zagPos = veryLeftPos+directionWalk[excavate_direction](i)
-            end
-            walkTo(zigPos,func)
-            walkTo(zagPos,func)
-        end
-    else
-        -- if front is larger then begin left but go forward and back again in zigzag
-        -- local veryFrontPos = veryLeftPos+directionWalk[excavate_direction](front)
-        for i=0,width-1 then
-            if (i%2 == 0) then
-                -- the begin which  iterates to the right
-                zigPos = veryLeftPos + directionWalk[(excavate_direction+1)%4](i)
-                -- the forwardFront which  iterates to the right
-                zagPos = veryLeftPos + directionWalk[excavate_direction](front) + directionWalk[(excavate_direction+1)%4](i)
-            else
-                zigPos = veryLeftPos + directionWalk[excavate_direction](front) + directionWalk[(excavate_direction+1)%4](i)
-                zagPos = veryLeftPos + directionWalk[(excavate_direction+1)%4](i)
-            end
-            walkTo(zigPos,func)
-            walkTo(zagPos,func)
-        end
-    end
-end]]
 
 -- define direction 
 -- define depth forward, left, right, up and down.
@@ -696,7 +750,8 @@ function excavateMain()
     print(tostring(directionWalk[4](-excavate_down)))
     --excavate(excavate_forward,excavate_left,excavate_right,0,-1,excavateWalk)
     excavateEverything()
-
+    --print("P: "..tostring(directionWalk[5](2)))
+    --walkTo(startPosition+directionWalk[direction](2)+directionWalk[1](2)+directionWalk[5](2),walk)
 end
 
 
