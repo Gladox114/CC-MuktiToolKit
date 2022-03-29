@@ -5,7 +5,7 @@ vector.__index = vector
 -- makes a new vector
 local function new(x,y,z)
     return setmetatable({x=x or 0, y=y or 0, z=z or 0}, vector)
-end  
+end
 
 -- check if an object is a vector
 local function isvector(t)
@@ -46,12 +46,17 @@ end
 -- variables
 local fuel_critical = 80
 local fuel_normal = 400
-local fuel_chest = new(0,0,0)
+local fuel_chest = new(-1,0,0)
 local fuel_chest_facing = 1
-local dispose_chest = new(-1,0,0)
+local dispose_chest = new(0,0,0)
 local dispose_chest_facing = 1
 local coordinates = new(0,0,0)
 local direction = 0
+local yFirst = false
+local itemBlacklist = { "minecraft:torch",
+                        "minecraft:coal",
+                        "minecraft:charcoal",
+                        "minecraft:dirt"}
 
 local strip_axis = 1 -- main path axis x,y,z for 1,2,3 and -1,-2,-3 for other direction
 local strip_direction = 0
@@ -65,21 +70,22 @@ local torch_distance = 7
 local torch_startDistance = 0
 
 local excavate_direction = 0
-local excavate_forward = 2
-local excavate_left = 0
-local excavate_right = 1
-local excavate_up = 2
-local excavate_down = 3
+local excavate_begin = excavate_direction
+local excavate_forward = 7
+local excavate_left = 4
+local excavate_right = 5
+local excavate_up = 3
+local excavate_down = 0
 local excavate_current = 1
 local excavate_currentLayer = 0
 
-local startPosition = NULL
-local savedLocation = NULL
-local savedDirection = NULL
+local startPosition = nil
+local savedLocation = nil
+local savedDirection = nil
 local locationStack = {}
 
 -- refuels if its not full. Scans inventory for coal
-function refuel() 
+function refuel()
     -- is it fully full?
     if (turtle.getFuelLevel() < turtle.getFuelLimit()-80) then
         -- scan inventory for coal
@@ -87,7 +93,7 @@ function refuel()
             -- get current item in inventory
             local data = turtle.getItemDetail(i)
             -- if its an item
-            if (data ~= NULL) then
+            if (data ~= nil) then
                 -- if its coal
                 if (data["name"] == "minecraft:charcoal" or data["name"] == "minecraft:coal") then
                     -- select this slot
@@ -149,7 +155,7 @@ end
 function checkForItem(itemName)
     for i=1,16 do
         local data = turtle.getItemDetail(i)
-        if (data ~= NULL and data["name"] == itemName) then
+        if (data ~= nil and data["name"] == itemName) then
             return i
         end
     end
@@ -236,7 +242,7 @@ function turnTo(x)
         if (turns > 2) then
             turnleft()
         else
-            for i=1,turns do    
+            for i=1,turns do
                 turnright()
             end
         end
@@ -248,21 +254,21 @@ end
 -- digs in front if something blocks it
 
 walk = {
-    function() 
+    function()
         while (not turtle.forward()) do
             turtle.dig()
         end
         virtWalk()
         checkFuel()
     end,
-    function() 
+    function()
         while (not turtle.up()) do
             turtle.digUp()
         end
         coordinates = coordinates + directionWalk[4](1)
         checkFuel()
     end,
-    function() 
+    function()
         while (not turtle.down()) do
             turtle.digDown()
         end
@@ -272,19 +278,19 @@ walk = {
 }
 
 walkNoChecks = {
-    function() 
+    function()
         while (not turtle.forward()) do
             turtle.dig()
         end
         virtWalk()
     end,
-    function() 
+    function()
         while (not turtle.up()) do
             turtle.digUp()
         end
         coordinates = coordinates + directionWalk[4](1)
     end,
-    function() 
+    function()
         while (not turtle.down()) do
             turtle.digDown()
         end
@@ -318,14 +324,14 @@ digTunnelWalk = {
     function()
         digWalk[1]()
         local _,data = turtle.inspectUp()
-        if (data ~= NULL and data["name"] ~= "minecraft:wall_torch") then
+        if (data ~= nil and data["name"] ~= "minecraft:wall_torch") then
             turtle.digUp()
         end
     end,
     function()
         digWalk[2]()
         local _,data = turtle.inspectUp()
-        if (data ~= NULL and data["name"] ~= "minecraft:wall_torch") then
+        if (data ~= nil and data["name"] ~= "minecraft:wall_torch") then
             turtle.digUp()
         end
     end,
@@ -384,9 +390,25 @@ function walkX(x,dirPlus,dirNegative,func)
     end
 end
 
+function walkY(y,func)
+    if (y < 0) then
+        for i=1,-y do
+            func[3]()
+        end
+    elseif (y > 0) then
+        for i=1,y do
+            func[2]()
+        end
+    end
+end
+
 function walkTo(vecPos, func)
     func = func or walk
     local pos = vecPos-coordinates
+    if (yFirst) then
+        walkY(pos.y,func)
+    end
+
     -- if the turtle is facing north or south, x or -x
     if (direction%2 == 0) then
         print("x"..tostring(vecPos))
@@ -397,15 +419,11 @@ function walkTo(vecPos, func)
         walkX(pos.z,1,3,func)
         walkX(pos.x,0,2,func)
     end
-    if (pos.y < 0) then
-        for i=1,-pos.y do
-            func[3]()
-        end
-    elseif (pos.y > 0) then
-        for i=1,pos.y do
-            func[2]()
-        end
+
+    if (not yFirst) then
+        walkY(pos.y,func)
     end
+
 end
 
 
@@ -431,7 +449,7 @@ function returnHome(func)
     end
 end
 
-function returnWork() 
+function returnWork()
     for i=1,#locationStack do
         walkTo(locationStack[i])
     end
@@ -454,7 +472,7 @@ function refuelFromChest()
             enough = true
         end
         -- suck to get more coal to refuel above normal
-        if (not enough) then 
+        if (not enough) then
             while (not turtle.suck()) do
                 print("No coal in the chest. Waiting 30 seconds")
                 sleep(30)
@@ -463,13 +481,30 @@ function refuelFromChest()
     end
 end
 
-function emptyToChest() 
+-- returns false if the item shouldn't be dropped/used etc
+-- returns true if there is an Item that isn't blacklisted
+function checkItemBlackList(data) 
+    if (data ~= nil) then
+        for _,item in pairs(itemBlacklist) do
+            if (data["name"] == item) then
+                return false
+            end
+        end
+        -- there are no blacklisted items
+        return true
+    else
+        return false
+    end
+
+end
+
+function emptyToChest()
     print("EmptyToChest")
     local _, data = turtle.inspect()
     if (data["name"] == "minecraft:chest") then
         for i=1,16 do
             local data = turtle.getItemDetail(i)
-            if (data ~= NULL and data["name"] ~= "minecraft:torch" and data["name"] ~= "minecraft:coal" and data["name"] ~= "minecraft:charcoal") then
+            if (checkItemBlackList(data)) then
                 turtle.select(i)
                 while (not turtle.drop()) do
                     print("Can't drop item. Waiting 10 seconds")
@@ -508,10 +543,10 @@ refuelHome = function()
     walkTo(fuel_chest,walkNoChecks)
     turnTo(fuel_chest_facing)
     refuelFromChest()
-    returnWork() 
+    returnWork()
 end
 
-emptyHome = function() 
+emptyHome = function()
     printStack()
     print("emptyHome")
     returnHome()
@@ -560,7 +595,7 @@ function stripMain()
         local stripPos = startPosition+directionWalk[strip_direction]((strip_stripDistance+1)*currentStrip_i)
         local stripLeftPos = stripPos+directionWalk[(strip_direction-1)%4](strip_leftLimit)
         local stripRightPos = stripPos+directionWalk[(strip_direction+1)%4](strip_rightLimit)
-        
+
         -- remove the last mainPath locationStack entry
         listPop(locationStack)
         -- walk to the main path
@@ -574,7 +609,7 @@ function stripMain()
         walkTo(stripRightPos,digTunnelWalk)
         walkBackwardsTo(stripPos)
 
-        
+
     end
 
 end
@@ -591,7 +626,7 @@ function stripMainPyramid()
         local stripPos = startPosition+directionWalk[strip_direction]((strip_stripDistance+1)*currentStrip_i)
         local stripLeftPos = stripPos+directionWalk[(strip_direction-1)%4](strip_leftLimit+currentStrip_i-1)
         local stripRightPos = stripPos+directionWalk[(strip_direction+1)%4](strip_rightLimit+currentStrip_i-1)
-        
+
         -- remove the last mainPath locationStack entry
         listPop(locationStack)
         -- walk to the main path
@@ -605,7 +640,7 @@ function stripMainPyramid()
         walkTo(stripRightPos,digTunnelWalk)
         walkBackwardsTo(stripPos)
 
-        
+
     end
 
 end
@@ -640,7 +675,11 @@ excavateUpWalk = {
         turtle.digUp()
     end,
     excavateWalk[2],
-    excavateWalk[3]
+    function()
+        turtle.digDown()
+        checkInventory()
+        walk[3]()
+    end
 }
 
 excavateDownWalk = {
@@ -650,7 +689,11 @@ excavateDownWalk = {
         walk[1]()
         turtle.digDown()
     end,
-    excavateWalk[2],
+    function()
+        turtle.digUp()
+        checkInventory()
+        walk[2]()
+    end,
     excavateWalk[3]
 }
 
@@ -663,6 +706,7 @@ function excavateLayer(i1,i2,iter,veryLeftPos,length,directionIter,directionToGo
 
     for i=i1,i2,iter do
         print("i: "..i)
+        -- if the zig or zag line is finished then switch the walkTo positions.
         if (i%2 == 0) then
             zigPos = veryLeftPos + directionWalk[directionIter](i)
             zagPos = veryLeftPos + directionWalk[directionToGo](length) + directionWalk[directionIter](i)
@@ -674,7 +718,11 @@ function excavateLayer(i1,i2,iter,veryLeftPos,length,directionIter,directionToGo
             walkTo(zagPos,func)
             walkTo(zigPos,func)
         else
-            walkTo(zigPos,func)
+            if (excavate_currentLayer == 0 and i == 0) then
+                walkTo(zigPos)
+            else
+                walkTo(zigPos,func)
+            end
             walkTo(zagPos,func)
         end
     end
@@ -685,26 +733,26 @@ end
 function excavate(forward,left,right,layer,offset,func)
     -- calculates the fastest zigzag pattern
     local width = left+right+1
-
-    local veryLeftPos = startPosition + directionWalk[excavate_direction](1) + directionWalk[(excavate_direction-1)%4](left) + directionWalk[4](offset)
-    if (forward < width) then
-        -- if the width is larger then begin from left to right    
+    -- get the very Left Position that is in front of the turtle
+    local veryLeftPos = startPosition + directionWalk[excavate_begin](1) + directionWalk[(excavate_direction-1)%4](left) + directionWalk[4](offset)
+    if (width > forward) then
+        -- if the width is larger then begin from left to right
         if (layer%2 == 0) then
-            excavateLayer(0,forward-1,1,veryLeftPos,width,excavate_direction,(excavate_direction+1)%4,func)
+            excavateLayer(0,forward-1,1,veryLeftPos,width-1,excavate_direction,(excavate_direction+1)%4,func)
         else
-            excavateLayer(forward-1,0,-1,veryLeftPos,width,excavate_direction,(excavate_direction+1)%4,func)
+            excavateLayer(forward-1,0,-1,veryLeftPos,width-1,excavate_direction,(excavate_direction+1)%4,func)
         end
     else
         -- if front is larger then begin left but go forward and back again in zigzag
         if (layer%2 == 0) then
-            excavateLayer(0,width-1,1,veryLeftPos,forward,(excavate_direction+1)%4,excavate_direction,func)
+            excavateLayer(0,width-1,1,veryLeftPos,forward-1,(excavate_direction+1)%4,excavate_direction,func)
         else
-            excavateLayer(width-1,0,-1,veryLeftPos,forward,(excavate_direction+1)%4,excavate_direction,func)
+            excavateLayer(width-1,0,-1,veryLeftPos,forward-1,(excavate_direction+1)%4,excavate_direction,func)
         end
     end
 end
 
--- define direction 
+-- define direction
 -- define depth forward, left, right, up and down.
 -- firstly it tries to do the first down layer. With that it goes slowly up till the top
 
@@ -721,6 +769,7 @@ function excavateEverything()
     end
 
     for i=excavate_currentLayer,layers do
+        excavate_currentLayer = i
         print("layer: "..i)
         print("upLength: "..upLength)
         print("offset: "..offset)
@@ -728,7 +777,11 @@ function excavateEverything()
         if (upLength > 2) then
             excavate(excavate_forward,excavate_left,excavate_right,i,offset,excavateWalk)
             upLength = upLength-3
-            offset = offset+3
+            if (upLength > 1) then
+                offset = offset+3
+            else
+                offset = offset+2
+            end
         -- if it has only 2 blocks space up
         elseif (upLength > 1) then
             excavate(excavate_forward,excavate_left,excavate_right,i,offset,excavateDownWalk)
@@ -738,7 +791,7 @@ function excavateEverything()
             upLength = upLength-1
         end
 
-    end 
+    end
 
 end
 
@@ -755,6 +808,31 @@ function excavateMain()
 end
 
 
+function preMovementSetup()
+    -- insert current position as the beginning in the stack for home
+    --table.insert(locationStack,coordinates:clone())
+    -- walk to the excavate location
+    --walkTo(new(10,0,0))
+    --[[excavateDownWalk[1] = function()
+        turtle.dig()
+        checkInventory()
+        walk[1]()
+        turtle.digDown()
+        local item = checkForItem("minecraft:dirt")
+        if (item) then
+            turtle.select(item)
+            turtle.placeDown()
+            turtle.select(1)
+        end
+    end]]
+
+end
+
+function endMovement()
+    -- use this so the emptyHome wont have the coordinates to go back to work so it can stay home
+    returnHome()
+    emptyHome()
+end
 
 -- MAIN --
 while (turtle.getFuelLevel() < 5) do
@@ -763,8 +841,9 @@ while (turtle.getFuelLevel() < 5) do
 end
 
 --stripMain()
+preMovementSetup()
 excavateMain()
-
+endMovement()
 
 -- debug --
 
